@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Nado Leaderboard</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header>
+    <div class="logo">↗ Nado Leaderboard</div>
+    <a class="trade-btn" href="https://app.nado.xyz?join=RZrrNhS" target="_blank" rel="noopener">Trade on Nado →</a>
+  </header>
+
+  <main>
+    <div class="controls-row">
+      <div class="tabs">
+        <button class="tab active" data-period="1d">1D</button>
+        <button class="tab" data-period="1w">1W</button>
+        <button class="tab active-default" data-period="1m">1M</button>
+        <button class="tab" data-period="all_time">All-time</button>
+      </div>
+      <div class="right-controls">
+        <select id="top-select">
+          <option value="20">Top 20</option>
+          <option value="50">Top 50</option>
+          <option value="100">Top 100</option>
+        </select>
+        <span id="last-updated" class="last-updated"></span>
+      </div>
+    </div>
+
+    <div class="search-row">
+      <input id="wallet-input" type="text" placeholder="Enter your wallet address" autocomplete="off" spellcheck="false" />
+      <button id="wallet-search-btn">Search</button>
+      <span id="search-msg" class="search-msg"></span>
+    </div>
+
+    <div id="loading" class="loading">
+      <div class="spinner"></div>
+      <span>Loading data…</span>
+    </div>
+
+    <div id="error-msg" class="error-msg hidden"></div>
+
+    <div id="table-wrap" class="hidden">
+      <table id="leaderboard-table">
+        <thead>
+          <tr>
+            <th data-col="rank" class="sortable">#</th>
+            <th data-col="display_address">Trader</th>
+            <th data-col="realized_pnl" class="sortable active-sort desc">Realized PnL</th>
+            <th data-col="volume" class="sortable">Volume</th>
+            <th data-col="fees" class="sortable">Fees</th>
+          </tr>
+        </thead>
+        <tbody id="leaderboard-body"></tbody>
+      </table>
+    </div>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
