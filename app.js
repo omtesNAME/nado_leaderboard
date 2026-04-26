@@ -13,8 +13,10 @@ let state = {
 };
 
 // ── DOM refs ──
-const tabs = document.querySelectorAll(".tab");
-const topSelect = document.getElementById("top-select");
+const tabs = document.querySelectorAll(".tab:not(.top-btn)");
+const topBtn = document.getElementById("top-btn");
+const topMenu = document.getElementById("top-menu");
+const topOptions = document.querySelectorAll(".top-option");
 const lastUpdatedEl = document.getElementById("last-updated");
 const loadingEl = document.getElementById("loading");
 const errorEl = document.getElementById("error-msg");
@@ -143,13 +145,23 @@ function setupTabs() {
   });
 }
 
-// ── Top select ──
+// ── Top dropdown ──
 function setupTopSelect() {
-  topSelect.value = String(DEFAULT_TOP);
-  topSelect.addEventListener("change", () => {
-    state.top = parseInt(topSelect.value, 10);
-    render();
+  topBtn.addEventListener("click", e => {
+    e.stopPropagation();
+    topMenu.classList.toggle("hidden");
   });
+
+  topOptions.forEach(opt => {
+    opt.addEventListener("click", () => {
+      state.top = parseInt(opt.dataset.value, 10);
+      topBtn.textContent = opt.textContent + " ▾";
+      topMenu.classList.add("hidden");
+      render();
+    });
+  });
+
+  document.addEventListener("click", () => topMenu.classList.add("hidden"));
 }
 
 // ── Sort ──
@@ -204,7 +216,7 @@ function updateLastUpdated() {
     const hrs = Math.floor(mins / 60);
     label = hrs === 1 ? "1 hour ago" : `${hrs} hours ago`;
   }
-  lastUpdatedEl.textContent = "Last updated: " + label;
+  lastUpdatedEl.textContent = "last updated: " + label;
 }
 
 // ── Format ──
