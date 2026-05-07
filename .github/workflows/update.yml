@@ -37,7 +37,7 @@ jobs:
         run: python fetch.py
         env:
           NADO_FULL_REFRESH: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.full_refresh == 'true' && '1' || '' }}
-          NADO_REQUEST_DELAY: "0"
+          NADO_REQUEST_DELAY: "0.35"
 
       - name: Commit and push if changed
         run: |

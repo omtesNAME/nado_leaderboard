@@ -32,10 +32,19 @@ SCHEMA_VERSION = 2
 SCALE = 10**18
 
 
-def post(payload, retries=3):
+def post(payload, retries=8):
     for attempt in range(retries):
         try:
             response = requests.post(API_URL, json=payload, headers=HEADERS, timeout=30)
+            if response.status_code == 429:
+                retry_after = response.headers.get("Retry-After")
+                wait_seconds = float(retry_after) if retry_after else min(60, 2 ** attempt)
+                print(
+                    f"Rate limited by Archive API; waiting {wait_seconds:.1f}s before retry...",
+                    flush=True,
+                )
+                time.sleep(wait_seconds)
+                continue
             response.raise_for_status()
             data = response.json()
             if not isinstance(data, dict):
