@@ -167,6 +167,20 @@ select#top-select:hover { border-color: #444; }
   color: var(--muted);
 }
 
+.stats-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin: -6px 0 18px;
+  color: var(--muted);
+  font-size: 12px;
+  flex-wrap: wrap;
+}
+
+.stats-row span {
+  white-space: nowrap;
+}
+
 /* ── Loading / Error ── */
 .loading {
   display: flex;

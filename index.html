@@ -8,8 +8,8 @@
 </head>
 <body>
   <header>
-    <div class="logo">↗ NADO leaderboard</div>
-    <a class="trade-btn" href="https://app.nado.xyz?join=RZrrNhS" target="_blank" rel="noopener">trade on NADO →</a>
+    <div class="logo">NADO leaderboard</div>
+    <a class="trade-btn" href="https://app.nado.xyz?join=RZrrNhS" target="_blank" rel="noopener">trade on NADO -></a>
   </header>
 
   <main>
@@ -22,7 +22,7 @@
       </div>
       <div class="right-controls">
         <div id="top-dropdown" class="top-dropdown">
-          <button id="top-btn" class="tab top-btn">top 20 ▾</button>
+          <button id="top-btn" class="tab top-btn">top 20 v</button>
           <div id="top-menu" class="top-menu hidden">
             <button class="top-option" data-value="20">top 20</button>
             <button class="top-option" data-value="50">top 50</button>
@@ -39,9 +39,16 @@
       <span id="search-msg" class="search-msg"></span>
     </div>
 
+    <div id="stats-row" class="stats-row hidden">
+      <span id="wallet-count">wallets: -</span>
+      <span id="match-count">processed matches: -</span>
+      <span id="archive-status">archive: pending bootstrap</span>
+      <span id="data-source">powered by Nado Archive API</span>
+    </div>
+
     <div id="loading" class="loading">
       <div class="spinner"></div>
-      <span>Loading data…</span>
+      <span>Loading data...</span>
     </div>
 
     <div id="error-msg" class="error-msg hidden"></div>

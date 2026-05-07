@@ -26,6 +26,10 @@ const walletInput = document.getElementById("wallet-input");
 const walletBtn = document.getElementById("wallet-search-btn");
 const searchMsg = document.getElementById("search-msg");
 const thCells = document.querySelectorAll("thead th[data-col]");
+const statsRow = document.getElementById("stats-row");
+const walletCountEl = document.getElementById("wallet-count");
+const matchCountEl = document.getElementById("match-count");
+const archiveStatusEl = document.getElementById("archive-status");
 
 // ── Init ──
 (async function init() {
@@ -49,9 +53,10 @@ async function loadData() {
     if (!res.ok) throw new Error("HTTP " + res.status);
     state.data = await res.json();
     updateLastUpdated();
+    updateStats();
     render();
   } catch (e) {
-    showError("Failed to load leaderboard.json. Run fetch.py first or check GitHub Actions.");
+    showError("Failed to load leaderboard.json. Run fetch.py first, use a local web server, or check GitHub Actions.");
   }
 }
 
@@ -219,11 +224,27 @@ function updateLastUpdated() {
   lastUpdatedEl.textContent = "last updated: " + label;
 }
 
+function updateStats() {
+  const stats = state.data?.stats || {};
+  const allTimeRows = state.data?.periods?.all_time || [];
+  const walletCount = stats.address_count ?? allTimeRows.length;
+  const matchCount = stats.total_matches_processed ?? stats.processed_matches ?? 0;
+
+  walletCountEl.textContent = "wallets: " + fmtInt(walletCount);
+  matchCountEl.textContent = "processed matches: " + fmtInt(matchCount);
+  archiveStatusEl.textContent = stats.archive_complete ? "archive: complete" : "archive: bootstrap pending";
+  statsRow.classList.remove("hidden");
+}
+
 // ── Format ──
 function fmtUsd(val) {
   const abs = Math.abs(val);
   const formatted = abs.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   return (val < 0 ? "-$" : "$") + formatted;
+}
+
+function fmtInt(val) {
+  return Number(val || 0).toLocaleString("en-US", { maximumFractionDigits: 0 });
 }
 
 function escHtml(str) {
