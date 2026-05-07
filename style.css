@@ -240,7 +240,8 @@ tbody tr {
 }
 tbody tr:last-child { border-bottom: none; }
 tbody tr:hover { background: var(--surface); }
-tbody tr.highlight { background: #20231f; }
+tbody tr.highlight { background: #24252a; }
+tbody tr.highlight:hover { background: #292a30; }
 
 tbody td {
   padding: 12px 14px;
