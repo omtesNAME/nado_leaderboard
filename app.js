@@ -61,12 +61,10 @@ function render() {
 
   const wallet = state.walletAddress.toLowerCase().trim();
   let userRow = null;
-  let userRank = null;
   if (wallet) {
     const found = sorted.find(r => r.address.toLowerCase() === wallet);
     if (found) {
       userRow = found;
-      userRank = found.rank;
     }
   }
 
@@ -77,15 +75,12 @@ function render() {
     tbody.appendChild(buildRow(row, isUser));
   });
 
-  if (wallet) {
-    if (userRow && userRank > state.top) {
-      const sep = document.createElement("tr");
-      sep.className = "separator";
-      sep.innerHTML = `<td colspan="5">...</td>`;
-      tbody.appendChild(sep);
-      tbody.appendChild(buildRow(userRow, true));
-      searchMsg.textContent = `Your rank: #${userRank}`;
-    }
+  if (wallet && userRow && !isWalletVisible(limited, wallet)) {
+    const sep = document.createElement("tr");
+    sep.className = "separator";
+    sep.innerHTML = `<td colspan="5">...</td>`;
+    tbody.appendChild(sep);
+    tbody.appendChild(buildRow(userRow, true));
   }
 
   showTable();
@@ -111,6 +106,10 @@ function buildRow(row, highlight) {
 
 function getPeriodRows() {
   return (state.data?.periods?.[state.period] || []).map(r => ({ ...r }));
+}
+
+function isWalletVisible(rows, wallet) {
+  return rows.some(row => row.address.toLowerCase() === wallet);
 }
 
 function sortRows(rows, col, dir) {
