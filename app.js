@@ -12,7 +12,6 @@ let state = {
   walletAddress: "",
 };
 
-// ── DOM refs ──
 const tabs = document.querySelectorAll(".tab:not(.top-btn)");
 const topBtn = document.getElementById("top-btn");
 const topMenu = document.getElementById("top-menu");
@@ -31,21 +30,18 @@ const walletCountEl = document.getElementById("wallet-count");
 const matchCountEl = document.getElementById("match-count");
 const archiveStatusEl = document.getElementById("archive-status");
 
-// ── Init ──
 (async function init() {
   setupTabs();
   setupTopSelect();
   setupSort();
   setupWalletSearch();
 
-  // default tab visual
   tabs.forEach(t => t.classList.remove("active"));
   document.querySelector(`[data-period="${DEFAULT_PERIOD}"]`).classList.add("active");
 
   await loadData();
 })();
 
-// ── Data loading ──
 async function loadData() {
   showLoading();
   try {
@@ -60,7 +56,6 @@ async function loadData() {
   }
 }
 
-// ── Render ──
 function render() {
   if (!state.data) return;
 
@@ -88,10 +83,9 @@ function render() {
 
   if (wallet) {
     if (userRow && userRank > state.top) {
-      // separator + user row below
       const sep = document.createElement("tr");
       sep.className = "separator";
-      sep.innerHTML = `<td colspan="5">···</td>`;
+      sep.innerHTML = `<td colspan="5">...</td>`;
       tbody.appendChild(sep);
       tbody.appendChild(buildRow(userRow, true));
       searchMsg.textContent = `Your rank: #${userRank}`;
@@ -138,7 +132,6 @@ function sortRows(rows, col, dir) {
   });
 }
 
-// ── Tabs ──
 function setupTabs() {
   tabs.forEach(tab => {
     tab.addEventListener("click", () => {
@@ -150,7 +143,6 @@ function setupTabs() {
   });
 }
 
-// ── Top dropdown ──
 function setupTopSelect() {
   topBtn.addEventListener("click", e => {
     e.stopPropagation();
@@ -160,7 +152,7 @@ function setupTopSelect() {
   topOptions.forEach(opt => {
     opt.addEventListener("click", () => {
       state.top = parseInt(opt.dataset.value, 10);
-      topBtn.textContent = opt.textContent + " ▾";
+      topBtn.textContent = opt.textContent + " v";
       topMenu.classList.add("hidden");
       render();
     });
@@ -169,7 +161,6 @@ function setupTopSelect() {
   document.addEventListener("click", () => topMenu.classList.add("hidden"));
 }
 
-// ── Sort ──
 function setupSort() {
   thCells.forEach(th => {
     if (!th.classList.contains("sortable")) return;
@@ -196,10 +187,11 @@ function updateSortHeaders() {
   });
 }
 
-// ── Wallet search ──
 function setupWalletSearch() {
   walletBtn.addEventListener("click", doWalletSearch);
-  walletInput.addEventListener("keydown", e => { if (e.key === "Enter") doWalletSearch(); });
+  walletInput.addEventListener("keydown", e => {
+    if (e.key === "Enter") doWalletSearch();
+  });
 }
 
 function doWalletSearch() {
@@ -207,7 +199,6 @@ function doWalletSearch() {
   render();
 }
 
-// ── Last updated ──
 function updateLastUpdated() {
   if (!state.data?.last_updated) return;
   const then = new Date(state.data.last_updated);
@@ -233,10 +224,11 @@ function updateStats() {
   walletCountEl.textContent = "wallets: " + fmtInt(walletCount);
   matchCountEl.textContent = "processed matches: " + fmtInt(matchCount);
   archiveStatusEl.textContent = stats.archive_complete ? "archive: complete" : "archive: bootstrap pending";
+  archiveStatusEl.classList.toggle("status-complete", Boolean(stats.archive_complete));
+  archiveStatusEl.classList.toggle("status-pending", !stats.archive_complete);
   statsRow.classList.remove("hidden");
 }
 
-// ── Format ──
 function fmtUsd(val) {
   const abs = Math.abs(val);
   const formatted = abs.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -251,7 +243,6 @@ function escHtml(str) {
   return str.replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 
-// ── UI state ──
 function showLoading() {
   loadingEl.classList.remove("hidden");
   tableWrap.classList.add("hidden");
