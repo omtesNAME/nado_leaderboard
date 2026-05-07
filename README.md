@@ -68,7 +68,7 @@ Safety knobs:
 - `NADO_FULL_REFRESH=1` rebuilds state from the full archive.
 - `NADO_ASSUME_NEWEST_FIRST=0` disables early incremental stop and scans the full archive.
 - `NADO_MAX_INCREMENTAL_PAGES=200` aborts incremental runs if known overlap is not reached.
-- `NADO_BOOTSTRAP_PAGE_BUDGET=5000` limits each bootstrap run so GitHub Actions can checkpoint progress before the 6 hour job limit.
+- `NADO_BOOTSTRAP_PAGE_BUDGET=12000` and `NADO_BOOTSTRAP_MAX_SECONDS=18000` limit each bootstrap run so GitHub Actions can checkpoint progress before the 6 hour job limit.
 - `NADO_RECENT_KEY_LIMIT=50000` controls the dedupe overlap window.
 
 ## Demo Checklist

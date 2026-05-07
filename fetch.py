@@ -23,6 +23,7 @@ RECENT_KEY_LIMIT = int(os.getenv("NADO_RECENT_KEY_LIMIT", "50000"))
 SEEN_PAGE_STOP_THRESHOLD = int(os.getenv("NADO_SEEN_PAGE_STOP_THRESHOLD", "2"))
 MAX_INCREMENTAL_PAGES = int(os.getenv("NADO_MAX_INCREMENTAL_PAGES", "200"))
 BOOTSTRAP_PAGE_BUDGET = int(os.getenv("NADO_BOOTSTRAP_PAGE_BUDGET", "0"))
+BOOTSTRAP_MAX_SECONDS = int(os.getenv("NADO_BOOTSTRAP_MAX_SECONDS", "0"))
 ASSUME_NEWEST_FIRST = os.getenv("NADO_ASSUME_NEWEST_FIRST", "1") != "0"
 
 DATA_DIR = Path("data")
@@ -135,6 +136,7 @@ def remember_key(keys, key_set, key):
 
 
 def process_archive(state, now, metrics):
+    started_at = time.perf_counter()
     explicit_full_refresh = is_explicit_full_refresh()
     bootstrap_resume = is_bootstrap_in_progress(state) and not explicit_full_refresh
     bootstrap_mode = explicit_full_refresh or bootstrap_resume or not state["recent_match_keys"] or not ASSUME_NEWEST_FIRST
@@ -226,10 +228,13 @@ def process_archive(state, now, metrics):
             break
 
         start += PAGE_LIMIT
-        if bootstrap_mode and BOOTSTRAP_PAGE_BUDGET and pages_scanned >= BOOTSTRAP_PAGE_BUDGET:
+        page_budget_reached = BOOTSTRAP_PAGE_BUDGET and pages_scanned >= BOOTSTRAP_PAGE_BUDGET
+        time_budget_reached = BOOTSTRAP_MAX_SECONDS and time.perf_counter() - started_at >= BOOTSTRAP_MAX_SECONDS
+        if bootstrap_mode and (page_budget_reached or time_budget_reached):
             metrics["bootstrap_paused"] = 1
+            reason = "page budget" if page_budget_reached else "time budget"
             print(
-                f"Bootstrap page budget reached at start={start}; saving checkpoint...",
+                f"Bootstrap {reason} reached at start={start}; saving checkpoint...",
                 flush=True,
             )
             break
