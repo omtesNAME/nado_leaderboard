@@ -117,7 +117,8 @@ main {
 }
 
 .search-row {
-  display: flex;
+  display: grid;
+  grid-template-columns: 1fr auto;
   align-items: center;
   gap: 10px;
   margin-bottom: 8px;
@@ -155,11 +156,6 @@ main {
   transition: background 0.15s, border-color 0.15s;
 }
 #wallet-search-btn:hover { background: #2a2b31; border-color: #484951; }
-
-.search-msg {
-  font-size: 13px;
-  color: var(--muted);
-}
 
 .stats-row {
   display: flex;
@@ -234,6 +230,9 @@ thead th {
   white-space: nowrap;
   user-select: none;
 }
+
+thead th.sortable { cursor: pointer; }
+thead th.sortable:hover { color: #b7b8bd; }
 
 tbody tr {
   border-bottom: 1px solid var(--border);
@@ -318,7 +317,5 @@ tr.separator td {
   main { padding: 18px 12px 40px; }
   .logo { font-size: 16px; }
   .trade-btn { padding: 7px 12px; }
-  .search-row { display: grid; grid-template-columns: 1fr auto; }
-  .search-msg { grid-column: 1 / -1; }
   .stats-row { align-items: flex-start; flex-direction: column; gap: 2px; }
 }

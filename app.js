@@ -7,6 +7,8 @@ let state = {
   data: null,
   period: DEFAULT_PERIOD,
   top: DEFAULT_TOP,
+  sortCol: "realized_pnl",
+  sortDir: "desc",
   walletAddress: "",
 };
 
@@ -21,12 +23,13 @@ const tableWrap = document.getElementById("table-wrap");
 const tbody = document.getElementById("leaderboard-body");
 const walletInput = document.getElementById("wallet-input");
 const walletBtn = document.getElementById("wallet-search-btn");
-const searchMsg = document.getElementById("search-msg");
+const thCells = document.querySelectorAll("thead th[data-col]");
 const statsRow = document.getElementById("stats-row");
 
 (async function init() {
   setupTabs();
   setupTopSelect();
+  setupSort();
   setupWalletSearch();
 
   tabs.forEach(t => t.classList.remove("active"));
@@ -53,13 +56,14 @@ function render() {
   if (!state.data) return;
 
   const rows = getPeriodRows();
-  const limited = rows.slice(0, state.top);
+  const sorted = sortRows(rows, state.sortCol, state.sortDir);
+  const limited = sorted.slice(0, state.top);
 
   const wallet = state.walletAddress.toLowerCase().trim();
   let userRow = null;
   let userRank = null;
   if (wallet) {
-    const found = rows.find(r => r.address.toLowerCase() === wallet);
+    const found = sorted.find(r => r.address.toLowerCase() === wallet);
     if (found) {
       userRow = found;
       userRank = found.rank;
@@ -81,13 +85,7 @@ function render() {
       tbody.appendChild(sep);
       tbody.appendChild(buildRow(userRow, true));
       searchMsg.textContent = `Your rank: #${userRank}`;
-    } else if (!userRow) {
-      searchMsg.textContent = "Address not found in this period";
-    } else {
-      searchMsg.textContent = `Your rank: #${userRank}`;
     }
-  } else {
-    searchMsg.textContent = "";
   }
 
   showTable();
@@ -113,6 +111,15 @@ function buildRow(row, highlight) {
 
 function getPeriodRows() {
   return (state.data?.periods?.[state.period] || []).map(r => ({ ...r }));
+}
+
+function sortRows(rows, col, dir) {
+  return [...rows].sort((a, b) => {
+    const av = a[col] ?? 0;
+    const bv = b[col] ?? 0;
+    if (typeof av === "string") return dir === "asc" ? av.localeCompare(bv) : bv.localeCompare(av);
+    return dir === "asc" ? av - bv : bv - av;
+  });
 }
 
 function setupTabs() {
@@ -142,6 +149,22 @@ function setupTopSelect() {
   });
 
   document.addEventListener("click", () => topMenu.classList.add("hidden"));
+}
+
+function setupSort() {
+  thCells.forEach(th => {
+    if (!th.classList.contains("sortable")) return;
+    th.addEventListener("click", () => {
+      const col = th.dataset.col;
+      if (state.sortCol === col) {
+        state.sortDir = state.sortDir === "desc" ? "asc" : "desc";
+      } else {
+        state.sortCol = col;
+        state.sortDir = "desc";
+      }
+      render();
+    });
+  });
 }
 
 function setupWalletSearch() {

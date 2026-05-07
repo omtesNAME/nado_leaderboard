@@ -37,7 +37,6 @@
     <div class="search-row">
       <input id="wallet-input" type="text" placeholder="enter your wallet address" autocomplete="off" spellcheck="false" />
       <button id="wallet-search-btn">search</button>
-      <span id="search-msg" class="search-msg"></span>
     </div>
 
     <div id="stats-row" class="stats-row hidden">
@@ -56,11 +55,11 @@
       <table id="leaderboard-table">
         <thead>
           <tr>
-            <th data-col="rank">#</th>
+            <th data-col="rank" class="sortable">#</th>
             <th data-col="display_address">trader</th>
-            <th data-col="realized_pnl">realized pnl</th>
-            <th data-col="volume">volume</th>
-            <th data-col="fees">fees</th>
+            <th data-col="realized_pnl" class="sortable">realized pnl</th>
+            <th data-col="volume" class="sortable">volume</th>
+            <th data-col="fees" class="sortable">fees</th>
           </tr>
         </thead>
         <tbody id="leaderboard-body"></tbody>
