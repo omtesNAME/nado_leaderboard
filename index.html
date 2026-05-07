@@ -10,19 +10,11 @@
   <header>
     <div class="brand">
       <div class="logo">NADO leaderboard</div>
-      <div class="tagline">Perp trader rankings from Archive API data</div>
     </div>
-    <a class="trade-btn" href="https://app.nado.xyz?join=RZrrNhS" target="_blank" rel="noopener">trade on NADO -></a>
+    <a class="trade-btn" href="https://app.nado.xyz?join=RZrrNhS" target="_blank" rel="noopener">trade on NADO</a>
   </header>
 
   <main>
-    <section class="overview">
-      <div>
-        <h1>Nado Perp Leaderboard</h1>
-        <p>Realized PnL, volume, and fee rankings across rolling periods and all-time history.</p>
-      </div>
-    </section>
-
     <div class="controls-row">
       <div class="tabs">
         <button class="tab" data-period="1d">1d</button>
@@ -32,14 +24,13 @@
       </div>
       <div class="right-controls">
         <div id="top-dropdown" class="top-dropdown">
-          <button id="top-btn" class="tab top-btn">top 20 v</button>
+          <button id="top-btn" class="tab top-btn">top 20</button>
           <div id="top-menu" class="top-menu hidden">
             <button class="top-option" data-value="20">top 20</button>
             <button class="top-option" data-value="50">top 50</button>
             <button class="top-option" data-value="100">top 100</button>
           </div>
         </div>
-        <span id="last-updated" class="last-updated"></span>
       </div>
     </div>
 
@@ -50,10 +41,8 @@
     </div>
 
     <div id="stats-row" class="stats-row hidden">
-      <span id="wallet-count">wallets: -</span>
-      <span id="match-count">processed matches: -</span>
-      <span id="archive-status">archive: pending bootstrap</span>
       <span id="data-source">powered by Nado Archive API</span>
+      <span id="last-updated" class="last-updated"></span>
     </div>
 
     <div id="loading" class="loading">
