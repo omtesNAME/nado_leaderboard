@@ -38,6 +38,7 @@ jobs:
         env:
           NADO_FULL_REFRESH: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.full_refresh == 'true' && '1' || '' }}
           NADO_REQUEST_DELAY: "0.35"
+          NADO_BOOTSTRAP_PAGE_BUDGET: "5000"
 
       - name: Commit and push if changed
         run: |

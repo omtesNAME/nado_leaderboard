@@ -22,6 +22,7 @@ REQUEST_DELAY = float(os.getenv("NADO_REQUEST_DELAY", "0.1"))
 RECENT_KEY_LIMIT = int(os.getenv("NADO_RECENT_KEY_LIMIT", "50000"))
 SEEN_PAGE_STOP_THRESHOLD = int(os.getenv("NADO_SEEN_PAGE_STOP_THRESHOLD", "2"))
 MAX_INCREMENTAL_PAGES = int(os.getenv("NADO_MAX_INCREMENTAL_PAGES", "200"))
+BOOTSTRAP_PAGE_BUDGET = int(os.getenv("NADO_BOOTSTRAP_PAGE_BUDGET", "0"))
 ASSUME_NEWEST_FIRST = os.getenv("NADO_ASSUME_NEWEST_FIRST", "1") != "0"
 
 DATA_DIR = Path("data")
@@ -114,12 +115,13 @@ def save_state(state):
     tmp_path.replace(STATE_PATH)
 
 
-def is_full_refresh(state):
-    return (
-        os.getenv("NADO_FULL_REFRESH") == "1"
-        or not state["recent_match_keys"]
-        or not ASSUME_NEWEST_FIRST
-    )
+def is_explicit_full_refresh():
+    return os.getenv("NADO_FULL_REFRESH") == "1"
+
+
+def is_bootstrap_in_progress(state):
+    stats = state.get("stats", {})
+    return bool(stats.get("bootstrap_in_progress")) and not bool(stats.get("archive_complete"))
 
 
 def remember_key(keys, key_set, key):
@@ -133,20 +135,26 @@ def remember_key(keys, key_set, key):
 
 
 def process_archive(state, now, metrics):
-    full_refresh = is_full_refresh(state)
-    previous_total = 0 if full_refresh else state["stats"].get("total_matches_processed", 0)
-    target_state = empty_state() if full_refresh else state
-    known_recent = set() if full_refresh else set(state["recent_match_keys"])
+    explicit_full_refresh = is_explicit_full_refresh()
+    bootstrap_resume = is_bootstrap_in_progress(state) and not explicit_full_refresh
+    bootstrap_mode = explicit_full_refresh or bootstrap_resume or not state["recent_match_keys"] or not ASSUME_NEWEST_FIRST
+    previous_total = 0 if explicit_full_refresh else state["stats"].get("total_matches_processed", 0)
+    target_state = empty_state() if explicit_full_refresh else state
+    known_recent = set() if bootstrap_mode else set(state["recent_match_keys"])
     run_seen_keys = []
     run_seen = set()
-    newest_keys = []
-    newest_seen = set()
-    start = 0
+    newest_keys = [] if explicit_full_refresh else list(target_state["recent_match_keys"])
+    newest_seen = set(newest_keys)
+    start = int(target_state["stats"].get("bootstrap_next_start", 0)) if bootstrap_resume else 0
     seen_pages = 0
     pages_scanned = 0
 
-    if full_refresh:
-        print("Full refresh: streaming complete match history into aggregates...", flush=True)
+    if explicit_full_refresh:
+        print("Full refresh: starting streamed bootstrap from page 0...", flush=True)
+    elif bootstrap_resume:
+        print(f"Resuming streamed bootstrap from start={start}...", flush=True)
+    elif bootstrap_mode:
+        print("Bootstrap required: streaming complete match history into aggregates...", flush=True)
     else:
         print("Incremental refresh: streaming newest pages until known matches...", flush=True)
 
@@ -170,11 +178,11 @@ def process_archive(state, now, metrics):
                 continue
 
             key = match_key(item)
-            if full_refresh and len(newest_keys) < RECENT_KEY_LIMIT and key not in newest_seen:
+            if bootstrap_mode and len(newest_keys) < RECENT_KEY_LIMIT and key not in newest_seen:
                 newest_keys.append(key)
                 newest_seen.add(key)
 
-            if not full_refresh and key in known_recent:
+            if not bootstrap_mode and key in known_recent:
                 page_seen += 1
                 continue
             if key in run_seen:
@@ -196,7 +204,7 @@ def process_archive(state, now, metrics):
                 flush=True,
             )
 
-        if not full_refresh:
+        if not bootstrap_mode:
             if page_seen == len(items):
                 seen_pages += 1
             else:
@@ -218,9 +226,16 @@ def process_archive(state, now, metrics):
             break
 
         start += PAGE_LIMIT
+        if bootstrap_mode and BOOTSTRAP_PAGE_BUDGET and pages_scanned >= BOOTSTRAP_PAGE_BUDGET:
+            metrics["bootstrap_paused"] = 1
+            print(
+                f"Bootstrap page budget reached at start={start}; saving checkpoint...",
+                flush=True,
+            )
+            break
         time.sleep(REQUEST_DELAY)
 
-    if full_refresh:
+    if bootstrap_mode:
         target_state["recent_match_keys"] = newest_keys[:RECENT_KEY_LIMIT]
     else:
         target_state["recent_match_keys"] = list(
@@ -234,11 +249,14 @@ def process_archive(state, now, metrics):
     target_state["stats"]["recent_duplicates"] = metrics["duplicate_matches"]
     target_state["stats"]["recent_skipped"] = metrics["skipped_matches"]
     target_state["stats"]["archive_complete"] = bool(metrics["archive_complete"])
+    target_state["stats"]["bootstrap_in_progress"] = bool(bootstrap_mode and not metrics["archive_complete"])
+    target_state["stats"]["bootstrap_next_start"] = start if target_state["stats"]["bootstrap_in_progress"] else None
     target_state["stats"]["last_full_refresh"] = (
-        target_state["last_updated"] if full_refresh and metrics["archive_complete"] else target_state["stats"].get("last_full_refresh")
+        target_state["last_updated"] if bootstrap_mode and metrics["archive_complete"] else target_state["stats"].get("last_full_refresh")
     )
     metrics["pages_scanned"] = pages_scanned
-    metrics["full_refresh"] = full_refresh
+    metrics["full_refresh"] = bootstrap_mode
+    metrics["bootstrap_resume"] = bootstrap_resume
     return target_state
 
 
@@ -456,6 +474,8 @@ def materialize_leaderboard(state, now):
             "total_matches_processed": stats.get("total_matches_processed", 0),
             "recent_matches_processed": stats.get("recent_matches_processed", 0),
             "archive_complete": bool(stats.get("archive_complete")),
+            "bootstrap_in_progress": bool(stats.get("bootstrap_in_progress")),
+            "bootstrap_next_start": stats.get("bootstrap_next_start"),
             "last_full_refresh": stats.get("last_full_refresh"),
         },
         "periods": {
@@ -487,6 +507,8 @@ def print_metrics(metrics, state, started_at):
     state_bytes = state_size_bytes()
     print("Pipeline metrics:", flush=True)
     print(f"  full_refresh={bool(metrics['full_refresh'])}", flush=True)
+    print(f"  bootstrap_resume={bool(metrics['bootstrap_resume'])}", flush=True)
+    print(f"  bootstrap_paused={bool(metrics['bootstrap_paused'])}", flush=True)
     print(f"  pages_scanned={metrics['pages_scanned']}", flush=True)
     print(f"  fetched_matches={metrics['fetched_matches']}", flush=True)
     print(f"  candidate_matches={metrics['candidate_matches']}", flush=True)
@@ -503,6 +525,7 @@ def print_metrics(metrics, state, started_at):
     print(f"  hourly_bucket_count={len(state.get('hourly_buckets', {}))}", flush=True)
     print(f"  daily_bucket_count={len(state.get('daily_buckets', {}))}", flush=True)
     print(f"  recent_key_count={len(state['recent_match_keys'])}", flush=True)
+    print(f"  bootstrap_next_start={state['stats'].get('bootstrap_next_start')}", flush=True)
     print(f"  state_size_bytes={state_bytes}", flush=True)
 
 
