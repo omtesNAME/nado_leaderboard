@@ -57,7 +57,9 @@ Local equivalent:
 NADO_FULL_REFRESH=1 NADO_REQUEST_DELAY=0 python fetch.py
 ```
 
-The bootstrap streams archive pages directly into aggregates, so it does not keep the full match history in memory. On GitHub Actions it runs in chunks using `NADO_BOOTSTRAP_PAGE_BUDGET`; if the archive is too large for one run, the workflow commits a checkpoint and the next run resumes from `bootstrap_next_start`.
+The bootstrap streams archive pages directly into aggregates, so it does not keep the full match history in memory. On GitHub Actions it runs in chunks using `NADO_BOOTSTRAP_PAGE_BUDGET`; if the archive is too large for one run, the workflow commits a checkpoint and the next run resumes from `bootstrap_next_idx`.
+
+Important: old checkpoints created before the `idx` cursor fix are not reusable. If `fetch.py` reports that the checkpoint was created by the old offset paginator, run one fresh `NADO_FULL_REFRESH=1` bootstrap.
 
 ## Incremental Updates
 
@@ -70,6 +72,16 @@ Safety knobs:
 - `NADO_MAX_INCREMENTAL_PAGES=200` aborts incremental runs if known overlap is not reached.
 - `NADO_BOOTSTRAP_PAGE_BUDGET=12000` and `NADO_BOOTSTRAP_MAX_SECONDS=18000` limit each bootstrap run so GitHub Actions can checkpoint progress before the 6 hour job limit.
 - `NADO_RECENT_KEY_LIMIT=50000` controls the dedupe overlap window.
+
+Fetcher diagnostics:
+
+- `duplicate_matches` counts records discarded because their dedupe key was already seen in the current run.
+- `missing_timestamps`, `invalid_records`, `malformed_matches`, and `skipped_matches` explain non-duplicate discards.
+- `Discard reasons` breaks down every discard reason.
+- `Dedupe key types` shows whether records used the preferred `match_effect_composite` key or a fallback key.
+- `repeated_page_fingerprints`, `consecutive_repeated_pages`, and `cursor_not_advanced_pages` detect bad pagination or endless repeated pages.
+
+The correct full-archive paginator uses the Archive API `idx` cursor based on `submission_idx`. A healthy bootstrap should have `processed_matches` close to `fetched_matches`; small duplicate counts can still happen at page boundaries.
 
 ## Demo Checklist
 

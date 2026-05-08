@@ -2,7 +2,7 @@ import hashlib
 import json
 import os
 import time
-from collections import defaultdict
+from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
 from json import JSONDecodeError
 from pathlib import Path
@@ -144,65 +144,129 @@ def process_archive(state, now, metrics):
     target_state = empty_state() if explicit_full_refresh else state
     known_recent = set() if bootstrap_mode else set(state["recent_match_keys"])
     run_seen_keys = []
-    run_seen = set()
+    bootstrap_boundary_keys = (
+        list(target_state["stats"].get("bootstrap_boundary_keys", []))
+        if bootstrap_resume
+        else []
+    )
+    run_seen = set(bootstrap_boundary_keys)
     newest_keys = [] if explicit_full_refresh else list(target_state["recent_match_keys"])
     newest_seen = set(newest_keys)
-    start = int(target_state["stats"].get("bootstrap_next_start", 0)) if bootstrap_resume else 0
+    if bootstrap_resume and target_state["stats"].get("bootstrap_next_idx") is None:
+        raise RuntimeError(
+            "Bootstrap checkpoint was created by the old offset paginator. "
+            "Run with NADO_FULL_REFRESH=1 once to rebuild using submission_idx pagination."
+        )
+    cursor_idx = (
+        int(target_state["stats"]["bootstrap_next_idx"])
+        if bootstrap_resume
+        else None
+    )
     seen_pages = 0
     pages_scanned = 0
+    page_fingerprints = {}
+    previous_page_fingerprint = None
+    last_boundary_keys = []
 
     if explicit_full_refresh:
         print("Full refresh: starting streamed bootstrap from page 0...", flush=True)
     elif bootstrap_resume:
-        print(f"Resuming streamed bootstrap from start={start}...", flush=True)
+        print(f"Resuming streamed bootstrap from idx<={cursor_idx}...", flush=True)
     elif bootstrap_mode:
         print("Bootstrap required: streaming complete match history into aggregates...", flush=True)
     else:
         print("Incremental refresh: streaming newest pages until known matches...", flush=True)
 
     while True:
-        data = post({"matches": {"limit": PAGE_LIMIT, "start": start}})
+        payload = {"matches": {"limit": PAGE_LIMIT}}
+        if cursor_idx is not None:
+            payload["matches"]["idx"] = str(cursor_idx)
+        data = post(payload)
         items = data.get("matches", [])
         txs = data.get("txs", [])
         if not isinstance(items, list):
             raise ValueError("Archive API response field matches must be a list")
         if not items:
+            metrics["empty_pages"] += 1
             break
         attach_tx_timestamps(items, txs)
 
         pages_scanned += 1
         page_seen = 0
         page_processed = 0
+        page_duplicate_keys = 0
+        page_keys = []
+        page_key_counts = Counter()
+        page_submission_indexes = []
+        page_key_by_submission_idx = defaultdict(list)
 
         for item in items:
             if not isinstance(item, dict):
                 metrics["malformed_matches"] += 1
+                metrics["invalid_records"] += 1
+                count_discard(metrics, "malformed_match")
                 continue
 
-            key = match_key(item)
+            key, key_type = match_key_info(item)
+            metrics["dedupe_key_types"][key_type] += 1
+            page_keys.append(key)
+            page_key_counts[key] += 1
+            if page_key_counts[key] > 1:
+                page_duplicate_keys += 1
+            submission_idx = parse_int(item.get("submission_idx"))
+            if submission_idx > 0:
+                page_submission_indexes.append(submission_idx)
+                page_key_by_submission_idx[submission_idx].append(key)
+
             if bootstrap_mode and len(newest_keys) < RECENT_KEY_LIMIT and key not in newest_seen:
                 newest_keys.append(key)
                 newest_seen.add(key)
 
             if not bootstrap_mode and key in known_recent:
                 page_seen += 1
+                count_discard(metrics, "known_recent_overlap")
                 continue
             if key in run_seen:
                 metrics["duplicate_matches"] += 1
+                count_discard(metrics, "duplicate_key_in_run")
+                remember_sample(metrics, "duplicate_keys", key)
                 continue
 
             remember_key(run_seen_keys, run_seen, key)
             if apply_match(target_state, item, now, metrics):
                 page_processed += 1
 
+        page_fingerprint = fingerprint_keys(page_keys)
+        if page_fingerprint:
+            if page_fingerprint == previous_page_fingerprint:
+                metrics["consecutive_repeated_pages"] += 1
+            previous_page_fingerprint = page_fingerprint
+
+            first_seen = page_fingerprints.get(page_fingerprint)
+            if first_seen is None:
+                page_fingerprints[page_fingerprint] = {
+                    "page": pages_scanned,
+                    "idx": cursor_idx,
+                }
+            else:
+                metrics["repeated_page_fingerprints"] += 1
+                metrics["matches_on_repeated_pages"] += len(items)
+                remember_sample(
+                    metrics,
+                    "repeated_pages",
+                    f"page={pages_scanned},idx={cursor_idx},first_page={first_seen['page']},first_idx={first_seen['idx']}",
+                )
+
         metrics["fetched_matches"] += len(items)
         metrics["candidate_matches"] += len(items) - page_seen
         metrics["known_matches_seen"] += page_seen
+        metrics["page_duplicate_keys"] += page_duplicate_keys
 
         if pages_scanned == 1 or metrics["fetched_matches"] % 5000 < PAGE_LIMIT:
             print(
                 f"Scanned page {pages_scanned}, fetched {metrics['fetched_matches']} "
-                f"matches, processed {metrics['processed_matches']}...",
+                f"matches, processed {metrics['processed_matches']}, "
+                f"duplicates {metrics['duplicate_matches']}...",
                 flush=True,
             )
 
@@ -222,19 +286,34 @@ def process_archive(state, now, metrics):
                     "run with NADO_FULL_REFRESH=1."
                 )
 
-        tx_count = len(txs) if isinstance(txs, list) else len(items)
-        if tx_count < PAGE_LIMIT:
+        if len(items) < PAGE_LIMIT:
             metrics["archive_complete"] = 1
             break
 
-        start += PAGE_LIMIT
+        if not page_submission_indexes:
+            raise RuntimeError("Archive API returned a full page without valid submission_idx values.")
+        next_cursor_idx = min(page_submission_indexes)
+        last_boundary_keys = page_key_by_submission_idx[next_cursor_idx]
+        if cursor_idx is not None and next_cursor_idx >= cursor_idx:
+            metrics["cursor_not_advanced_pages"] += 1
+            remember_sample(
+                metrics,
+                "cursor_not_advanced",
+                f"page={pages_scanned},idx={cursor_idx},next_idx={next_cursor_idx}",
+            )
+            if metrics["cursor_not_advanced_pages"] >= 2:
+                raise RuntimeError(
+                    "Archive pagination cursor did not advance for two pages; "
+                    "aborting to avoid an endless repeated-page scan."
+                )
+        cursor_idx = next_cursor_idx
         page_budget_reached = BOOTSTRAP_PAGE_BUDGET and pages_scanned >= BOOTSTRAP_PAGE_BUDGET
         time_budget_reached = BOOTSTRAP_MAX_SECONDS and time.perf_counter() - started_at >= BOOTSTRAP_MAX_SECONDS
         if bootstrap_mode and (page_budget_reached or time_budget_reached):
             metrics["bootstrap_paused"] = 1
             reason = "page budget" if page_budget_reached else "time budget"
             print(
-                f"Bootstrap {reason} reached at start={start}; saving checkpoint...",
+                f"Bootstrap {reason} reached at idx<={cursor_idx}; saving checkpoint...",
                 flush=True,
             )
             break
@@ -253,9 +332,29 @@ def process_archive(state, now, metrics):
     target_state["stats"]["recent_matches_processed"] = metrics["processed_matches"]
     target_state["stats"]["recent_duplicates"] = metrics["duplicate_matches"]
     target_state["stats"]["recent_skipped"] = metrics["skipped_matches"]
+    target_state["stats"]["recent_invalid_records"] = metrics["invalid_records"]
+    target_state["stats"]["recent_missing_timestamps"] = metrics["discard_reasons"].get(
+        "missing_or_invalid_timestamp", 0
+    )
+    target_state["stats"]["recent_discard_reasons"] = dict(metrics["discard_reasons"])
+    target_state["stats"]["recent_dedupe_key_types"] = dict(metrics["dedupe_key_types"])
+    target_state["stats"]["recent_pagination_diagnostics"] = {
+        "page_duplicate_keys": metrics["page_duplicate_keys"],
+        "repeated_page_fingerprints": metrics["repeated_page_fingerprints"],
+        "consecutive_repeated_pages": metrics["consecutive_repeated_pages"],
+        "matches_on_repeated_pages": metrics["matches_on_repeated_pages"],
+        "cursor_not_advanced_pages": metrics["cursor_not_advanced_pages"],
+        "empty_pages": metrics["empty_pages"],
+    }
     target_state["stats"]["archive_complete"] = bool(metrics["archive_complete"])
     target_state["stats"]["bootstrap_in_progress"] = bool(bootstrap_mode and not metrics["archive_complete"])
-    target_state["stats"]["bootstrap_next_start"] = start if target_state["stats"]["bootstrap_in_progress"] else None
+    target_state["stats"]["bootstrap_next_idx"] = (
+        cursor_idx if target_state["stats"]["bootstrap_in_progress"] else None
+    )
+    target_state["stats"]["bootstrap_next_start"] = target_state["stats"]["bootstrap_next_idx"]
+    target_state["stats"]["bootstrap_boundary_keys"] = (
+        last_boundary_keys if target_state["stats"]["bootstrap_in_progress"] else []
+    )
     target_state["stats"]["last_full_refresh"] = (
         target_state["last_updated"] if bootstrap_mode and metrics["archive_complete"] else target_state["stats"].get("last_full_refresh")
     )
@@ -266,6 +365,26 @@ def process_archive(state, now, metrics):
 
 
 def match_key(match):
+    return match_key_info(match)[0]
+
+
+def match_key_info(match):
+    composite_fields = [
+        match.get("digest"),
+        match.get("submission_idx"),
+        nested_get(match, ("order", "sender")),
+        nested_get(match, ("post_balance", "base", "perp", "product_id")),
+        match.get("is_taker"),
+        match.get("base_filled"),
+        match.get("quote_filled"),
+        match.get("cumulative_base_filled"),
+        match.get("cumulative_quote_filled"),
+        match.get("cumulative_fee"),
+    ]
+    if all(value is not None for value in composite_fields):
+        encoded = json.dumps(composite_fields, separators=(",", ":")).encode("utf-8")
+        return "match_effect:" + hashlib.sha256(encoded).hexdigest(), "match_effect_composite"
+
     for field in (
         "digest",
         "id",
@@ -278,10 +397,26 @@ def match_key(match):
     ):
         value = match.get(field)
         if value:
-            return f"{field}:{value}"
+            return f"{field}:{value}", field
 
     encoded = json.dumps(match, sort_keys=True, separators=(",", ":")).encode("utf-8")
-    return "sha256:" + hashlib.sha256(encoded).hexdigest()
+    return "sha256:" + hashlib.sha256(encoded).hexdigest(), "sha256_full_match"
+
+
+def nested_get(value, path):
+    current = value
+    for key in path:
+        if not isinstance(current, dict):
+            return None
+        current = current.get(key)
+    return current
+
+
+def fingerprint_keys(keys):
+    if not keys:
+        return None
+    encoded = "\n".join(keys).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
 
 
 def attach_tx_timestamps(matches, txs):
@@ -309,13 +444,15 @@ def attach_tx_timestamps(matches, txs):
 
 
 def match_timestamp(match):
-    ts = match.get("timestamp", 0)
+    ts = match.get("timestamp")
     try:
         ts = float(ts)
     except (TypeError, ValueError):
-        return 0
+        return None
     if ts > 10_000_000_000:
         ts = ts / 1000
+    if ts <= 0:
+        return None
     return int(ts)
 
 
@@ -337,6 +474,22 @@ def match_address(match):
     if not isinstance(sender, str) or len(sender) < 42:
         return None
     return sender[:42].lower()
+
+
+def skip_match(metrics, reason):
+    metrics["skipped_matches"] += 1
+    metrics["invalid_records"] += 1
+    count_discard(metrics, reason)
+
+
+def count_discard(metrics, reason):
+    metrics["discard_reasons"][reason] += 1
+
+
+def remember_sample(metrics, name, value, limit=5):
+    samples = metrics["samples"].setdefault(name, [])
+    if len(samples) < limit and value not in samples:
+        samples.append(value)
 
 
 def metric_from_match(match):
@@ -365,11 +518,17 @@ def add_metric(target, delta):
 def apply_match(state, match, now, metrics):
     address = match_address(match)
     if not address:
-        metrics["skipped_matches"] += 1
+        skip_match(metrics, "missing_or_invalid_sender")
         return False
 
-    day = match_day(match)
-    hour = match_hour(match)
+    ts = match_timestamp(match)
+    if ts is None:
+        skip_match(metrics, "missing_or_invalid_timestamp")
+        remember_sample(metrics, "missing_timestamp_keys", match_key(match))
+        return False
+
+    day = datetime.fromtimestamp(ts, timezone.utc).strftime("%Y-%m-%d")
+    hour = datetime.fromtimestamp(ts, timezone.utc).strftime("%Y-%m-%dT%H:00:00Z")
     delta = metric_from_match(match)
 
     total = state["address_totals"].setdefault(address, empty_metric())
@@ -504,7 +663,11 @@ def state_size_bytes():
 
 
 def new_metrics():
-    return defaultdict(int)
+    metrics = defaultdict(int)
+    metrics["discard_reasons"] = Counter()
+    metrics["dedupe_key_types"] = Counter()
+    metrics["samples"] = {}
+    return metrics
 
 
 def print_metrics(metrics, state, started_at):
@@ -519,10 +682,34 @@ def print_metrics(metrics, state, started_at):
     print(f"  candidate_matches={metrics['candidate_matches']}", flush=True)
     print(f"  processed_matches={metrics['processed_matches']}", flush=True)
     print(f"  duplicate_matches={metrics['duplicate_matches']}", flush=True)
+    print(f"  page_duplicate_keys={metrics['page_duplicate_keys']}", flush=True)
     print(f"  known_matches_seen={metrics['known_matches_seen']}", flush=True)
     print(f"  overlap_reached={bool(metrics['overlap_reached'])}", flush=True)
+    print(f"  missing_timestamps={metrics['discard_reasons'].get('missing_or_invalid_timestamp', 0)}", flush=True)
+    print(f"  invalid_records={metrics['invalid_records']}", flush=True)
     print(f"  skipped_matches={metrics['skipped_matches']}", flush=True)
     print(f"  malformed_matches={metrics['malformed_matches']}", flush=True)
+    print(f"  empty_pages={metrics['empty_pages']}", flush=True)
+    print(f"  repeated_page_fingerprints={metrics['repeated_page_fingerprints']}", flush=True)
+    print(f"  consecutive_repeated_pages={metrics['consecutive_repeated_pages']}", flush=True)
+    print(f"  matches_on_repeated_pages={metrics['matches_on_repeated_pages']}", flush=True)
+    print(f"  cursor_not_advanced_pages={metrics['cursor_not_advanced_pages']}", flush=True)
+    print("Discard reasons:", flush=True)
+    if metrics["discard_reasons"]:
+        for reason, count in metrics["discard_reasons"].most_common():
+            print(f"  {reason}={count}", flush=True)
+    else:
+        print("  none=0", flush=True)
+    print("Dedupe key types:", flush=True)
+    if metrics["dedupe_key_types"]:
+        for key_type, count in metrics["dedupe_key_types"].most_common():
+            print(f"  {key_type}={count}", flush=True)
+    else:
+        print("  none=0", flush=True)
+    if metrics["samples"]:
+        print("Diagnostic samples:", flush=True)
+        for name, values in metrics["samples"].items():
+            print(f"  {name}={values}", flush=True)
     print(f"  fetch_seconds={metrics['fetch_seconds']:.2f}", flush=True)
     print(f"  aggregation_seconds={metrics['aggregation_seconds']:.2f}", flush=True)
     print(f"  total_seconds={elapsed:.2f}", flush=True)
@@ -530,6 +717,7 @@ def print_metrics(metrics, state, started_at):
     print(f"  hourly_bucket_count={len(state.get('hourly_buckets', {}))}", flush=True)
     print(f"  daily_bucket_count={len(state.get('daily_buckets', {}))}", flush=True)
     print(f"  recent_key_count={len(state['recent_match_keys'])}", flush=True)
+    print(f"  bootstrap_next_idx={state['stats'].get('bootstrap_next_idx')}", flush=True)
     print(f"  bootstrap_next_start={state['stats'].get('bootstrap_next_start')}", flush=True)
     print(f"  state_size_bytes={state_bytes}", flush=True)
 
